@@ -2,6 +2,8 @@ import pandas as pd
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from flask import Flask
+from threading import Thread
 
 # === Настройки ===
 TOKEN = "8291705742:AAH1cgkPmJWVZLum7U8CwF84dCGJIau7XuY"
@@ -10,6 +12,21 @@ CSV_FILE = "bonds.csv"
 # Хранилище фильтров по пользователям
 user_filters = {}
 
+# === Веб-сервер для Replit ===
+app_flask = Flask('')
+
+@app_flask.route('/')
+def home():
+    return "✅ Бот работает! (Replit + UptimeRobot)"
+
+def run_flask():
+    app_flask.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# === Загрузка данных ===
 def load_bonds():
     df = pd.read_csv(CSV_FILE, sep=";", on_bad_lines='skip', dtype=str)
     numeric_cols = [
@@ -19,22 +36,21 @@ def load_bonds():
         "Лет до даты",
         "Купон (раз/год)",
         "чистая прибыль",
-        "ROI (всего)"  # <-- новый столбец
+        "ROI (всего)"
     ]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
     return df
 
+# === Команды Telegram ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Используйте /filter для подбора облигаций.")
 
 async def show_filter_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id=None):
     chat_id = chat_id or update.effective_chat.id
     if chat_id not in user_filters:
-        user_filters[chat_id] = {
-            "sort_by": "чистая прибыль"
-        }
+        user_filters[chat_id] = {"sort_by": "чистая прибыль"}
 
     filters = user_filters[chat_id]
     text = "📊 Выберите фильтр:\n\n"
@@ -203,8 +219,6 @@ async def show_top20(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 freq = row["Купон (раз/год)"]
                 profit = row["чистая прибыль"]
                 roi = row["ROI (всего)"]
-
-                # Форматирование ROI в %
                 roi_str = f"{roi:.1%}" if pd.notna(roi) else "—"
 
                 text += (
@@ -226,8 +240,9 @@ async def show_top20(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back_to_menu")]])
         )
 
-# Запуск
+# === Запуск ===
 def main():
+    keep_alive()  # ← Запуск веб-сервера
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("filter", show_filter_menu))
@@ -237,7 +252,7 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern="^back_to_menu$"))
     app.add_handler(CallbackQueryHandler(handle_filter_choice, pattern="^reset_filters$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_filter_value))
-    print("Бот запущен...")
+    print("✅ Бот запущен...")
     app.run_polling()
 
 if __name__ == "__main__":
